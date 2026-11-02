@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import glob
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 import pandas as pd
 
@@ -65,7 +65,7 @@ LOADER_SPECS = {
 }
 
 
-def _first_csv(directory: str) -> Optional[str]:
+def _first_csv(directory: str) -> str | None:
     """Return the first CSV file found recursively in `directory`."""
     hits = glob.glob(os.path.join(directory, "**", "*.csv"), recursive=True)
     return hits[0] if hits else None
