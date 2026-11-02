@@ -19,6 +19,25 @@ pythonpath = ["."]
 [tool.ruff]
 target-version = "py39"
 line-length = 120
+extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
+
+# Phase 2: modules not yet touched by the refactor keep their original import
+# layout / f-strings; remove these ignores as each module is cleaned.
+[tool.ruff.lint.per-file-ignores]
+"bms/__init__.py" = ["I001", "F401"]
+"bms/bms_controller.py" = ["I001", "F401", "F541"]
+"bms/cell_balancer.py" = ["I001", "F401"]
+"bms/cell_model.py" = ["I001", "F401"]
+"bms/chemistries.py" = ["I001", "F401"]
+"bms/config.py" = ["I001", "F401"]
+"bms/driving_profiles.py" = ["I001", "F401", "F541"]
+"bms/manufacturer_profiles.py" = ["I001", "F401"]
+"bms/power_limits.py" = ["I001", "F401"]
+"bms/soc_estimator.py" = ["I001", "F401"]
+"bms/soh_estimator.py" = ["I001", "F401"]
+"bms/supervisor.py" = ["I001", "F401"]
+"bms/vehicles.py" = ["I001", "F401", "E402", "F811"]
+"tests/test_bms.py" = ["I001", "F401", "E402", "F841", "F811"]
