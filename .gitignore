@@ -29,3 +29,7 @@ uploads/
 .env.providers
 .env
 data/kaggle/bms_v21/BMS-Datav2/*.npy
+.venv/
+.ruff_cache/
+.pytest_cache/
+reports/
