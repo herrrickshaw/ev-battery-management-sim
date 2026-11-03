@@ -86,3 +86,11 @@ class TestValidationRunner:
         data = {"degradation": DATASET_REGISTRY["degradation"]()}
         assert list(validate_bms_model(data)) == ["degradation_model"]
         assert validate_bms_model({}) == {}
+
+
+def test_simulation_package_reexports_old_names():
+    for name in ("simulate_two_wheeler", "simulate_four_wheeler_retrofit", "simulate_electric_bus",
+                 "simulate_degradation", "simulate_cold_temperature", "simulate_driving_degradation",
+                 "simulate_manufacturer_comparison", "print_comparison_table", "main", "VEHICLE_MAP",
+                 "_simulate_charge_discharge", "_soh_marker", "_soh_status", "_degradation_point", "_plot"):
+        assert hasattr(simulation, name), name

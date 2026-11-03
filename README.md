@@ -60,7 +60,7 @@ BMSController.step(current, dt)
 | State machine: INIT, IDLE, PRE_CHARGE, CHARGING_CC/CV/FLOAT, DISCHARGING, BALANCING, FAULT, SHUTDOWN | `bms/supervisor.py` |
 | Chemistry / vehicle / manufacturer / driving presets | `bms/chemistries.py`, `vehicles.py`, `manufacturer_profiles.py`, `driving_profiles.py` |
 | Pack controller | `bms/bms_controller.py` |
-| Scenarios and CLI | `bms/simulation.py` |
+| Scenarios and CLI | `bms/simulation/` (package: `charge_discharge`, `degradation`, `cold`, `driving`, `manufacturers`, `report`, `cli`) |
 | Synthetic generators, loaders, validation | `bms/datasets/` |
 
 Design notes: the simulation functions return plain data (histories, dicts) and print tables separately; dataset
