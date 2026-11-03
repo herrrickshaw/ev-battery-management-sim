@@ -14,17 +14,20 @@ Validation dimensions
 5. RUL estimate from SOH trend vs dataset RUL      ← lifecycle model
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import replace as _dc_replace
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Any
 
-from ..chemistries import NMC, LFP
 from ..cell_model import CellModel
-from ..soc_estimator import EKFSOCEstimator
+from ..chemistries import LFP, NMC
 from ..config import DEFAULT_EKF
-from dataclasses import replace as _dc_replace
-from .synthetic import _NASA_CELL_CONFIG   # same config as data generator
-
+from ..soc_estimator import EKFSOCEstimator
+from .synthetic import _NASA_CELL_CONFIG  # same config as data generator
 
 # ---------------------------------------------------------------------------
 # Helper metrics
@@ -47,7 +50,7 @@ def _mape(pred: np.ndarray, actual: np.ndarray) -> float:
 # 1. SOC estimation accuracy (NASA / BMS telemetry)
 # ---------------------------------------------------------------------------
 
-def validate_soc_estimation(df_nasa: pd.DataFrame) -> Dict[str, Any]:
+def validate_soc_estimation(df_nasa: pd.DataFrame) -> dict[str, Any]:
     """
     Run EKF SOC estimator on one discharge cycle from the NASA-format dataset
     and compare against coulomb-counting SOC.
@@ -104,7 +107,7 @@ def validate_soc_estimation(df_nasa: pd.DataFrame) -> Dict[str, Any]:
 # 2. Capacity / SOH fade curve
 # ---------------------------------------------------------------------------
 
-def validate_degradation_model(df_deg: pd.DataFrame) -> Dict[str, Any]:
+def validate_degradation_model(df_deg: pd.DataFrame) -> dict[str, Any]:
     """
     Compare the BMS simulate_degradation() linear model against measured SOH
     from the degradation dataset.
@@ -145,7 +148,7 @@ def validate_degradation_model(df_deg: pd.DataFrame) -> Dict[str, Any]:
 # 3. Voltage prediction accuracy
 # ---------------------------------------------------------------------------
 
-def validate_voltage_model(df_bms: pd.DataFrame) -> Dict[str, Any]:
+def validate_voltage_model(df_bms: pd.DataFrame) -> dict[str, Any]:
     """
     Compare 2-RC Thevenin model voltage prediction against measured cell
     terminal voltages from the BMS telemetry dataset.
@@ -186,7 +189,7 @@ def validate_voltage_model(df_bms: pd.DataFrame) -> Dict[str, Any]:
 # 4. RUL estimation from SOH trend
 # ---------------------------------------------------------------------------
 
-def validate_rul_model(df_rul: pd.DataFrame) -> Dict[str, Any]:
+def validate_rul_model(df_rul: pd.DataFrame) -> dict[str, Any]:
     """
     Estimate RUL from the fitted linear SOH model and compare against
     the dataset's ground-truth RUL column.
@@ -218,7 +221,7 @@ def validate_rul_model(df_rul: pd.DataFrame) -> Dict[str, Any]:
 # 5. Multi-module BMS health detection
 # ---------------------------------------------------------------------------
 
-def validate_distributed_bms(df_dist: pd.DataFrame) -> Dict[str, Any]:
+def validate_distributed_bms(df_dist: pd.DataFrame) -> dict[str, Any]:
     """
     Validate that the degraded module (module 3, SOH=85%) shows measurably
     different voltage and SOC depletion compared to healthy modules.
@@ -255,7 +258,17 @@ def validate_distributed_bms(df_dist: pd.DataFrame) -> Dict[str, Any]:
 # Master validation runner
 # ---------------------------------------------------------------------------
 
-def validate_bms_model(datasets: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+# (dataset key, result key, validator) — add a row to register a new check.
+_VALIDATORS: list[tuple[str, str, Callable[[pd.DataFrame], dict[str, Any]]]] = [
+    ("nasa_battery", "soc_estimation", validate_soc_estimation),
+    ("degradation", "degradation_model", validate_degradation_model),
+    ("bms_telemetry", "voltage_model", validate_voltage_model),
+    ("rul_features", "rul_model", validate_rul_model),
+    ("distributed_bms", "distributed_bms", validate_distributed_bms),
+]
+
+
+def validate_bms_model(datasets: dict[str, pd.DataFrame]) -> dict[str, Any]:
     """
     Run all validation checks against the provided dataset dict.
 
@@ -268,22 +281,9 @@ def validate_bms_model(datasets: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
     dict of validation results, one key per dimension.
     """
     results = {}
-
-    if "nasa_battery" in datasets:
-        results["soc_estimation"] = validate_soc_estimation(datasets["nasa_battery"])
-
-    if "degradation" in datasets:
-        results["degradation_model"] = validate_degradation_model(datasets["degradation"])
-
-    if "bms_telemetry" in datasets:
-        results["voltage_model"] = validate_voltage_model(datasets["bms_telemetry"])
-
-    if "rul_features" in datasets:
-        results["rul_model"] = validate_rul_model(datasets["rul_features"])
-
-    if "distributed_bms" in datasets:
-        results["distributed_bms"] = validate_distributed_bms(datasets["distributed_bms"])
-
+    for dataset_key, result_key, validator in _VALIDATORS:
+        if dataset_key in datasets:
+            results[result_key] = validator(datasets[dataset_key])
     return results
 
 
@@ -291,87 +291,101 @@ def validate_bms_model(datasets: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
 # Pretty-print report
 # ---------------------------------------------------------------------------
 
-def print_validation_report(results: Dict[str, Any]) -> None:
+def _print_soc_section(r: dict[str, Any]) -> None:
+    """Print the soc_estimation section of the validation report."""
+    print("\n  1. EKF SOC Estimation  (NASA 18650 discharge cycles)")
+    print(f"  {'─'*60}")
+    if "error" in r:
+        print(f"     ERROR: {r['error']}")
+    else:
+        print(f"     Samples       : {r['n_samples']:,}")
+        print(f"     RMSE (SOC)    : {r['rmse_soc']*100:.3f} %")
+        print(f"     MAE  (SOC)    : {r['mae_soc']*100:.3f} %")
+        print(f"     Max error     : {r['max_err_soc']*100:.3f} %")
+        print(f"     EKF final SOC : {r['ekf_soc_final']*100:.1f} %   "
+              f"(true: {r['true_soc_final']*100:.1f} %)")
+        verdict = "PASS ✓" if r["rmse_soc"] < 0.03 else "REVIEW"
+        print(f"     Verdict       : {verdict}  (target RMSE < 3 %)")
+
+
+def _print_degradation_section(r: dict[str, Any]) -> None:
+    """Print the degradation_model section of the validation report."""
+    print(f"\n  2. Capacity Fade Model  (Li-Ion Degradation, {r['n_cycles']} cycles)")
+    print(f"  {'─'*60}")
+    print(f"     SOH RMSE      : {r['soh_rmse_pct']:.4f} %")
+    print(f"     SOH MAE       : {r['soh_mae_pct']:.4f} %")
+    print(f"     Capacity RMSE : {r['cap_rmse_ah']:.4f} Ah")
+    print(f"     R0 RMSE       : {r['r0_rmse_mohm']:.4f} mΩ")
+    print(f"     Fitted fade   : {r['fitted_deg_rate']:.5f} %/cycle")
+    print(f"     Fitted R0 growth: {r['fitted_r0_growth']:.5f} %/cycle")
+    print(f"     EOL prediction: cycle {r['eol_cycle_pred']:,}  (SOH=80 % threshold)")
+
+
+def _print_voltage_section(r: dict[str, Any]) -> None:
+    """Print the voltage_model section of the validation report."""
+    print(f"\n  3. 2-RC Voltage Model  (BMS v2.1 telemetry, {r['n_samples']:,} steps)")
+    print(f"  {'─'*60}")
+    if "error" in r:
+        print(f"     ERROR: {r['error']}")
+    else:
+        print(f"     Voltage RMSE  : {r['v_rmse_mv']:.2f} mV")
+        print(f"     Voltage MAE   : {r['v_mae_mv']:.2f} mV")
+        print(f"     Max error     : {r['v_max_err_mv']:.2f} mV")
+        print(f"     MAPE          : {r['v_mape_pct']:.4f} %")
+        verdict = "PASS ✓" if r["v_rmse_mv"] < 20.0 else "REVIEW"
+        print(f"     Verdict       : {verdict}  (target RMSE < 20 mV)")
+
+
+def _print_rul_section(r: dict[str, Any]) -> None:
+    """Print the rul_model section of the validation report."""
+    print(f"\n  4. RUL Estimation  ({r['n_cycles']} cycles)")
+    print(f"  {'─'*60}")
+    print(f"     RUL RMSE      : {r['rul_rmse_cycles']:.1f} cycles")
+    print(f"     RUL MAE       : {r['rul_mae_cycles']:.1f} cycles")
+    print(f"     RUL MAPE      : {r['rul_mape_pct']:.2f} %")
+    print(f"     Fitted fade   : {r['fitted_fade_rate']:.5f} Ah/cycle")
+    print(f"     EOL predicted : cycle {r['eol_cycle_predicted']:,}")
+
+
+def _print_distributed_section(r: dict[str, Any]) -> None:
+    """Print the distributed_bms section of the validation report."""
+    print("\n  5. Multi-Module Health Detection  (Distributed BMS)")
+    print(f"  {'─'*60}")
+    print(f"     Degraded modules  : {r['degraded_module_ids']}")
+    print(f"     Degraded avg SOH  : {r['degraded_avg_soh_pct']:.1f} %")
+    print(f"     Healthy avg SOH   : {r['healthy_avg_soh_pct']:.1f} %")
+    print(f"     SOC drop detected : {'YES ✓' if r['soh_detectable'] else 'NO'}")
+    print(f"     Degraded alerts   : {r['degraded_alert_count']:,}")
+    print(f"     Healthy alerts    : {r['healthy_alert_count']:,}")
+    print("\n     Module summary:")
+    print(f"     {'ModID':>6}  {'SOH%':>6}  {'AvgSOC%':>8}  {'MinSOC%':>8}  "
+          f"{'AvgTemp':>8}  {'Alerts':>7}")
+    print(f"     {'─'*55}")
+    for m in r["module_summary"]:
+        print(f"     {m['module_id']:>6}  {m['soh']:>6.1f}  {m['avg_soc']:>8.1f}  "
+              f"{m['min_soc']:>8.1f}  {m['avg_temp']:>8.2f}  {m['alert_count']:>7}")
+
+
+_SECTION_PRINTERS = [
+    ("soc_estimation", _print_soc_section),
+    ("degradation_model", _print_degradation_section),
+    ("voltage_model", _print_voltage_section),
+    ("rul_model", _print_rul_section),
+    ("distributed_bms", _print_distributed_section),
+]
+
+
+def print_validation_report(results: dict[str, Any]) -> None:
+    """Print the human-readable validation report for a ``validate_bms_model`` result dict."""
     W = 74
 
     print(f"\n{'='*W}")
     print("  BMS MODEL VALIDATION REPORT — Kaggle Battery Datasets")
     print(f"{'='*W}")
 
-    # 1. SOC Estimation
-    if "soc_estimation" in results:
-        r = results["soc_estimation"]
-        print(f"\n  1. EKF SOC Estimation  (NASA 18650 discharge cycles)")
-        print(f"  {'─'*60}")
-        if "error" in r:
-            print(f"     ERROR: {r['error']}")
-        else:
-            print(f"     Samples       : {r['n_samples']:,}")
-            print(f"     RMSE (SOC)    : {r['rmse_soc']*100:.3f} %")
-            print(f"     MAE  (SOC)    : {r['mae_soc']*100:.3f} %")
-            print(f"     Max error     : {r['max_err_soc']*100:.3f} %")
-            print(f"     EKF final SOC : {r['ekf_soc_final']*100:.1f} %   "
-                  f"(true: {r['true_soc_final']*100:.1f} %)")
-            verdict = "PASS ✓" if r["rmse_soc"] < 0.03 else "REVIEW"
-            print(f"     Verdict       : {verdict}  (target RMSE < 3 %)")
-
-    # 2. Degradation model
-    if "degradation_model" in results:
-        r = results["degradation_model"]
-        print(f"\n  2. Capacity Fade Model  (Li-Ion Degradation, {r['n_cycles']} cycles)")
-        print(f"  {'─'*60}")
-        print(f"     SOH RMSE      : {r['soh_rmse_pct']:.4f} %")
-        print(f"     SOH MAE       : {r['soh_mae_pct']:.4f} %")
-        print(f"     Capacity RMSE : {r['cap_rmse_ah']:.4f} Ah")
-        print(f"     R0 RMSE       : {r['r0_rmse_mohm']:.4f} mΩ")
-        print(f"     Fitted fade   : {r['fitted_deg_rate']:.5f} %/cycle")
-        print(f"     Fitted R0 growth: {r['fitted_r0_growth']:.5f} %/cycle")
-        print(f"     EOL prediction: cycle {r['eol_cycle_pred']:,}  (SOH=80 % threshold)")
-
-    # 3. Voltage model
-    if "voltage_model" in results:
-        r = results["voltage_model"]
-        print(f"\n  3. 2-RC Voltage Model  (BMS v2.1 telemetry, {r['n_samples']:,} steps)")
-        print(f"  {'─'*60}")
-        if "error" in r:
-            print(f"     ERROR: {r['error']}")
-        else:
-            print(f"     Voltage RMSE  : {r['v_rmse_mv']:.2f} mV")
-            print(f"     Voltage MAE   : {r['v_mae_mv']:.2f} mV")
-            print(f"     Max error     : {r['v_max_err_mv']:.2f} mV")
-            print(f"     MAPE          : {r['v_mape_pct']:.4f} %")
-            verdict = "PASS ✓" if r["v_rmse_mv"] < 20.0 else "REVIEW"
-            print(f"     Verdict       : {verdict}  (target RMSE < 20 mV)")
-
-    # 4. RUL model
-    if "rul_model" in results:
-        r = results["rul_model"]
-        print(f"\n  4. RUL Estimation  ({r['n_cycles']} cycles)")
-        print(f"  {'─'*60}")
-        print(f"     RUL RMSE      : {r['rul_rmse_cycles']:.1f} cycles")
-        print(f"     RUL MAE       : {r['rul_mae_cycles']:.1f} cycles")
-        print(f"     RUL MAPE      : {r['rul_mape_pct']:.2f} %")
-        print(f"     Fitted fade   : {r['fitted_fade_rate']:.5f} Ah/cycle")
-        print(f"     EOL predicted : cycle {r['eol_cycle_predicted']:,}")
-
-    # 5. Distributed BMS
-    if "distributed_bms" in results:
-        r = results["distributed_bms"]
-        print(f"\n  5. Multi-Module Health Detection  (Distributed BMS)")
-        print(f"  {'─'*60}")
-        print(f"     Degraded modules  : {r['degraded_module_ids']}")
-        print(f"     Degraded avg SOH  : {r['degraded_avg_soh_pct']:.1f} %")
-        print(f"     Healthy avg SOH   : {r['healthy_avg_soh_pct']:.1f} %")
-        print(f"     SOC drop detected : {'YES ✓' if r['soh_detectable'] else 'NO'}")
-        print(f"     Degraded alerts   : {r['degraded_alert_count']:,}")
-        print(f"     Healthy alerts    : {r['healthy_alert_count']:,}")
-        print(f"\n     Module summary:")
-        print(f"     {'ModID':>6}  {'SOH%':>6}  {'AvgSOC%':>8}  {'MinSOC%':>8}  "
-              f"{'AvgTemp':>8}  {'Alerts':>7}")
-        print(f"     {'─'*55}")
-        for m in r["module_summary"]:
-            print(f"     {m['module_id']:>6}  {m['soh']:>6.1f}  {m['avg_soc']:>8.1f}  "
-                  f"{m['min_soc']:>8.1f}  {m['avg_temp']:>8.2f}  {m['alert_count']:>7}")
+    for key, printer in _SECTION_PRINTERS:
+        if key in results:
+            printer(results[key])
 
     print(f"\n{'='*W}")
     print("  NOTE: Results above use synthetic data matching Kaggle dataset schemas.")
