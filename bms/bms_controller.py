@@ -192,6 +192,7 @@ class BMSController:
         pack_voltage = sum(v_cells)
         pack_soc_mean = float(np.mean(soc_estimates))
         t_max = float(np.max(t_cells))
+        t_min = float(np.min(t_cells))
 
         # SOH estimation (uses weakest cell = min voltage)
         soh_state = self._soh.update(current, float(np.min(v_cells)), dt)
