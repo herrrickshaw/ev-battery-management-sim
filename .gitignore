@@ -33,3 +33,5 @@ data/kaggle/bms_v21/BMS-Datav2/*.npy
 .ruff_cache/
 .pytest_cache/
 reports/
+.coverage
+coverage.xml
