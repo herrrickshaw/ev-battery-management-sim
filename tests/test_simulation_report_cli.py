@@ -270,6 +270,9 @@ class TestChargeDischargeEngine:
     def test_initial_soc_spread_is_two_percent_centered(self):
         hist = charge_discharge._simulate_charge_discharge(
             TWO_WHEELER, soc_init=0.5, charge_s=1, discharge_s=1, discharge_current=1.0, print_interval=1000)
+        socs = hist[0].cell_soc_estimates
+        assert max(socs) - min(socs) == pytest.approx(0.02, abs=2e-3)
+        assert socs[0] < socs[-1]
         v = hist[0].cell_voltages_v
         assert v[-1] > v[0]  # higher-SOC cells sit at higher terminal voltage
 
